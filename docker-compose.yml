@@ -1,0 +1,106 @@
+version: '3.3'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  broker:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: broker
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CREATE_TOPICS: ${KAFKA_TRANSFER_TOPIC?Variable not set}
+      # KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  producer:
+    container_name: producer
+    volumes:
+      - ./producer/app/:/app/
+    build:
+      context: producer/
+      dockerfile: producer.dockerfile
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-true}
+    depends_on:
+      - broker
+      - zookeeper
+      - consumer
+    env_file:
+      - .env
+    restart: always
+    environment:
+      - LISTEN_TIMEOUT=${LISTEN_TIMEOUT?Variable not set}
+      - KAFKA_HOST=${KAFKA_HOST?Variable not set}
+      - GARANTEX_API_HOST=${GARANTEX_API_HOST?Variable not set}
+      - KAFKA_TRANSFER_TOPIC=${KAFKA_TRANSFER_TOPIC?Variable not set}
+    # command: bash -c "while true; do sleep 1; done"  # Infinite loop to keep container live doing nothing
+    command: bash ./start.sh
+
+  db:
+    image: postgres:12
+    volumes:
+      - .docker/postgres:/var/lib/postgresql/data/pgdata
+    env_file:
+      - .env
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+
+  pgadmin:
+    image: dpage/pgadmin4
+    networks:
+      - default
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin4@pgadmin.org}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+
+  consumer:
+    container_name: consumer
+    volumes:
+     - ./consumer/app:/app
+    build:
+      context: consumer/
+      dockerfile: consumer.dockerfile
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-true}
+    depends_on:
+      - broker
+      - zookeeper
+      - db
+    
+    restart: always
+
+    env_file:
+      - .env
+    environment:
+      - KAFKA_HOST=${KAFKA_HOST?Variable not set}
+      - KAFKA_TRANSFER_TOPIC=${KAFKA_TRANSFER_TOPIC?Variable not set}
+      - POSTGRES_HOST=${POSTGRES_HOST?Variable not set}
+      - POSTGRES_PORT=${POSTGRES_PORT?Variable not set}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+
+    # command: bash -c "while true; do sleep 1; done"  # Infinite loop to keep container live doing nothing
+    command: bash ./start.sh

@@ -1,0 +1,1 @@
+python /app/app/consumer_pre_start.py
